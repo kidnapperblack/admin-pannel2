@@ -1,0 +1,1545 @@
+<!DOCTYPE html>
+<!-- ============================================================
+     GROWBIT PRIVATE LIMITED — ADMIN PANEL  v2
+     File: growbit_admin.html
+     Data: shared via localStorage key "growbit_data"
+
+     FIXES APPLIED:
+     [1] ID Generation: AUTO mode (auto-increment, no-dup) +
+         MANUAL mode (custom entry with duplicate check & error)
+     [2] Team Tree: Change Sponsor modal — move any user to new upline
+     [3] Monthly Reset: ONLY resets points, never touches structure
+     [4] Global Stats: Instant auto-update on every points change
+     [5] Leaderboard animation: preserves open expand-rows on refresh
+     [6] Data sync: debounced saveState, BroadcastChannel + storage event
+     [7] Performance: DocumentFragment, cached sorted array, getSorted cache
+     [8] refreshAll: context-aware, only updates visible widgets
+     ============================================================ -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GROWBIT Admin Panel</title>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ── DESIGN TOKENS ── */
+:root {
+  --emerald:#0A8754; --emerald-light:#10B981; --emerald-dark:#065F46;
+  --gold:#D4AF37;    --gold-light:#F0D060;    --gold-dark:#A07820;
+  --red:#EF4444;     --red-dark:#991B1B;
+  --blue:#3B82F6;    --blue-dark:#1D4ED8;
+  --purple:#8B5CF6;
+  --charcoal:#1A1F2E; --charcoal-mid:#252D3D; --charcoal-light:#2E3748;
+  --glass:rgba(255,255,255,.06); --glass-border:rgba(255,255,255,.1);
+  --text-primary:#F0F4F8; --text-muted:#8B9BB4;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'DM Sans',sans-serif;background:var(--charcoal);color:var(--text-primary);min-height:100vh}
+
+/* ── LAYOUT ── */
+.admin-shell{display:flex;min-height:100vh}
+.sidebar{width:240px;flex-shrink:0;background:var(--charcoal-mid);border-right:1px solid rgba(212,175,55,.15);display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto}
+.sidebar-brand{padding:22px 20px 18px;border-bottom:1px solid rgba(212,175,55,.12)}
+.brand-logo{display:flex;align-items:center;gap:10px}
+.brand-icon{width:36px;height:36px;background:linear-gradient(135deg,var(--emerald),var(--emerald-light));border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.brand-name{font-family:'Cinzel',serif;font-size:.85rem;font-weight:700;color:var(--text-primary);line-height:1.2}
+.brand-sub{font-size:.65rem;color:var(--gold);text-transform:uppercase;letter-spacing:1px}
+.sidebar-nav{padding:16px 12px;flex:1}
+.nav-section-label{font-size:.62rem;text-transform:uppercase;letter-spacing:2px;color:var(--text-muted);padding:0 8px;margin:16px 0 6px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;cursor:pointer;font-size:.84rem;font-weight:500;color:var(--text-muted);transition:all .2s;border:none;background:transparent;width:100%;text-align:left}
+.nav-item:hover{background:rgba(255,255,255,.06);color:var(--text-primary)}
+.nav-item.active{background:rgba(212,175,55,.1);color:var(--gold-light);border-left:3px solid var(--gold)}
+.nav-item svg{flex-shrink:0;opacity:.7}
+.nav-item.active svg{opacity:1}
+.sidebar-footer{padding:16px 20px;border-top:1px solid rgba(255,255,255,.06)}
+.admin-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.25);color:#f87171;padding:5px 12px;border-radius:16px;font-size:.72rem;font-weight:700;letter-spacing:.5px}
+
+/* ── TOP BAR ── */
+.topbar{background:var(--charcoal-mid);border-bottom:1px solid rgba(212,175,55,.12);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
+.topbar-title{font-family:'Cinzel',serif;font-size:1rem;font-weight:700;background:linear-gradient(135deg,var(--gold-light),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent}
+.topbar-actions{display:flex;align-items:center;gap:10px}
+
+/* ── PAGES ── */
+.admin-page{display:none;padding:28px}.admin-page.active{display:block}
+
+/* ── SECTION TITLE ── */
+.sec-title{font-family:'Cinzel',serif;font-size:1.3rem;font-weight:700;background:linear-gradient(135deg,var(--gold-light),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent;margin-bottom:4px}
+.sec-sub{color:var(--text-muted);font-size:.82rem;margin-bottom:20px}
+
+/* ── CARDS ── */
+.card{background:var(--charcoal-mid);border:1px solid rgba(212,175,55,.15);border-radius:16px;padding:24px;position:relative;overflow:hidden}
+.card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,rgba(212,175,55,.4),transparent)}
+.card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
+.stat-card{background:var(--glass);border:1px solid var(--glass-border);border-radius:12px;padding:18px;transition:all .2s}
+.stat-card:hover{border-color:rgba(212,175,55,.3);transform:translateY(-2px)}
+.stat-val{font-family:'Cinzel',serif;font-size:2rem;font-weight:700;background:linear-gradient(135deg,var(--gold-light),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent}
+.stat-label{font-size:.72rem;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin-top:4px;font-weight:600}
+
+/* ── BUTTONS ── */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 18px;border-radius:8px;font-size:.82rem;font-weight:600;border:none;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif}
+.btn-green{background:linear-gradient(135deg,var(--emerald),var(--emerald-light));color:#fff;box-shadow:0 3px 12px rgba(10,135,84,.35)}
+.btn-green:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(10,135,84,.5)}
+.btn-gold{background:linear-gradient(135deg,var(--gold-dark),var(--gold));color:#1a1200;box-shadow:0 3px 12px rgba(212,175,55,.3)}
+.btn-gold:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(212,175,55,.45)}
+.btn-red{background:linear-gradient(135deg,var(--red-dark),var(--red));color:#fff;box-shadow:0 3px 12px rgba(239,68,68,.3)}
+.btn-red:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(239,68,68,.45)}
+.btn-ghost{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:var(--text-muted)}
+.btn-ghost:hover{border-color:rgba(255,255,255,.25);color:var(--text-primary)}
+.btn-blue{background:linear-gradient(135deg,var(--blue-dark),var(--blue));color:#fff;box-shadow:0 3px 12px rgba(59,130,246,.3)}
+.btn-blue:hover{transform:translateY(-1px)}
+.btn-sm{padding:5px 12px;font-size:.75rem}
+.btn-xs{padding:3px 9px;font-size:.7rem}
+
+/* ── INPUTS ── */
+.form-group{display:flex;flex-direction:column;gap:5px;margin-bottom:14px}
+.form-label{font-size:.7rem;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);font-weight:700}
+.form-input,.form-select{background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.1);color:var(--text-primary);padding:10px 14px;border-radius:9px;font-family:'DM Sans',sans-serif;font-size:.87rem;transition:border-color .2s;width:100%}
+.form-input:focus,.form-select:focus{outline:none;border-color:rgba(212,175,55,.5);background:rgba(0,0,0,.45)}
+.form-input::placeholder{color:var(--text-muted)}
+.form-input.input-error{border-color:rgba(239,68,68,.6)!important;background:rgba(239,68,68,.05)!important}
+.form-select option{background:var(--charcoal-mid);color:var(--text-primary)}
+.form-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+
+/* [FIX 1] ID mode toggle */
+.id-mode-toggle{display:flex;gap:0;border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,.1);margin-bottom:14px}
+.id-mode-btn{flex:1;padding:8px 12px;border:none;cursor:pointer;font-size:.78rem;font-weight:600;font-family:'DM Sans',sans-serif;transition:all .2s;background:rgba(0,0,0,.25);color:var(--text-muted)}
+.id-mode-btn.active{background:linear-gradient(135deg,var(--emerald),var(--emerald-light));color:#fff}
+.id-error-msg{font-size:.73rem;color:#f87171;margin-top:4px;display:none}
+.id-error-msg.show{display:block}
+
+/* ── TABLE ── */
+.tbl-wrap{overflow-x:auto;border-radius:12px;border:1px solid rgba(255,255,255,.06)}
+.tbl{width:100%;border-collapse:collapse;min-width:900px}
+.tbl thead tr{background:linear-gradient(90deg,var(--charcoal-light),rgba(212,175,55,.04),var(--charcoal-light));border-bottom:1px solid rgba(212,175,55,.18)}
+.tbl th{padding:12px 14px;text-align:left;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);white-space:nowrap}
+.tbl th.gold{color:var(--gold)}
+.tbl td{padding:11px 14px;font-size:.83rem;border-bottom:1px solid rgba(255,255,255,.04);white-space:nowrap;vertical-align:middle}
+.tbl tbody tr{transition:background .15s}
+.tbl tbody tr:hover{background:rgba(212,175,55,.04)}
+.tbl tbody tr:last-child td{border-bottom:none}
+.tbl .rank-badge{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;font-size:.78rem;font-weight:900;font-family:'Cinzel',serif}
+.medal-gold{background:linear-gradient(135deg,#fde68a,#D4AF37);color:#78350f;box-shadow:0 2px 8px rgba(212,175,55,.5)}
+.medal-silver{background:linear-gradient(135deg,#e2e8f0,#94a3b8);color:#1e293b}
+.medal-bronze{background:linear-gradient(135deg,#fed7aa,#f97316);color:#431407}
+.cid-mono{font-family:monospace;font-size:.75rem;color:var(--text-muted)}
+.pts-blue{color:#60A5FA;font-weight:700}
+.pts-teal{color:#34D399;font-weight:700}
+.pts-purple{color:#A78BFA;font-weight:700}
+.pts-gold{font-weight:800;background:linear-gradient(135deg,var(--gold-light),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent}
+.action-cell{display:flex;gap:5px;align-items:center;flex-wrap:nowrap}
+.tag{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:12px;font-size:.7rem;font-weight:600}
+.tag-green{background:rgba(16,185,129,.12);color:#34D399;border:1px solid rgba(16,185,129,.2)}
+.tag-gold{background:rgba(212,175,55,.12);color:var(--gold-light);border:1px solid rgba(212,175,55,.2)}
+.tag-blue{background:rgba(96,165,250,.12);color:#60A5FA;border:1px solid rgba(96,165,250,.2)}
+
+/* [FIX 5] LB expand rows – preserve on refresh */
+@keyframes rowIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}
+.row-anim{animation:rowIn .25s ease both}
+@keyframes flashGreen{0%{background:rgba(16,185,129,.15)}100%{background:transparent}}
+@keyframes flashRed{0%{background:rgba(239,68,68,.15)}100%{background:transparent}}
+.flash-up{animation:flashGreen .8s ease}
+.flash-dn{animation:flashRed .8s ease}
+.exp-row{display:none!important}.exp-row.lb-open{display:table-row!important}
+
+/* ── MODAL ── */
+.modal-overlay{position:fixed;inset:0;z-index:99999;display:none;align-items:center;justify-content:center;background:rgba(8,10,18,.88);backdrop-filter:blur(10px)}
+.modal-overlay.open{display:flex}
+.modal-panel{background:var(--charcoal-mid);border:1px solid rgba(212,175,55,.2);border-radius:20px;width:560px;max-width:96vw;max-height:92vh;overflow-y:auto;position:relative;box-shadow:0 40px 80px rgba(0,0,0,.6)}
+.modal-panel::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--gold),transparent)}
+@keyframes panelIn{from{opacity:0;transform:scale(.9) translateY(16px)}to{opacity:1;transform:scale(1) translateY(0)}}
+.modal-overlay.open .modal-panel{animation:panelIn .3s cubic-bezier(.34,1.56,.64,1) both}
+.modal-hdr{padding:20px 24px 14px;border-bottom:1px solid rgba(212,175,55,.1);display:flex;align-items:center;justify-content:space-between}
+.modal-title{font-family:'Cinzel',serif;font-size:1rem;font-weight:700;background:linear-gradient(135deg,var(--gold-light),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent}
+.modal-close{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:var(--text-muted);border-radius:50%;width:30px;height:30px;cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
+.modal-close:hover{background:rgba(239,68,68,.2);border-color:rgba(239,68,68,.4);color:#f87171}
+.modal-body{padding:22px 24px}
+.modal-foot{padding:0 24px 20px;display:flex;gap:10px;justify-content:flex-end}
+
+/* ── ORBIT MODAL CARDS ── */
+.orb-chip{display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:7px 12px;font-size:.75rem;color:var(--text-muted)}
+.orb-chip strong{font-size:.95rem;font-weight:800;color:var(--text-primary);font-family:'Cinzel',serif}
+.orb-card{display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.03);margin-bottom:8px;transition:all .2s;cursor:pointer}
+.orb-card:hover{border-color:rgba(212,175,55,.25);background:rgba(212,175,55,.04)}
+.orb-avi{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:.72rem;font-family:'Cinzel',serif;flex-shrink:0}
+.avi1{background:linear-gradient(135deg,rgba(10,135,84,.3),rgba(16,185,129,.2));color:var(--emerald-light);border:1px solid rgba(16,185,129,.3)}
+.avi2{background:linear-gradient(135deg,rgba(124,58,237,.3),rgba(167,139,250,.2));color:#A78BFA;border:1px solid rgba(167,139,250,.3)}
+.orb-info .nm{font-weight:700;font-size:.85rem;color:var(--text-primary)}
+.orb-info .id{font-size:.7rem;color:var(--text-muted);font-family:monospace}
+.orb-pts{font-weight:700;font-size:.72rem;padding:3px 10px;border-radius:16px;background:rgba(212,175,55,.1);border:1px solid rgba(212,175,55,.2);color:var(--gold-light)}
+.orb-empty{text-align:center;padding:32px 16px;color:var(--text-muted);font-size:.85rem}
+.orb-tabs{display:flex;gap:4px;margin-bottom:14px}
+.orb-tab{padding:8px 16px;border-radius:8px 8px 0 0;cursor:pointer;font-size:.78rem;font-weight:600;font-family:'DM Sans',sans-serif;background:transparent;color:var(--text-muted);transition:all .2s;border:1px solid transparent;border-bottom:none}
+.orb-tab.active{background:var(--charcoal);color:var(--gold-light);border-color:rgba(212,175,55,.2)}
+
+/* ── TREE STYLES ── */
+.tree-node{display:flex;align-items:center;gap:10px;padding:9px 14px;border-radius:9px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.03);margin-bottom:5px;transition:all .2s}
+.tree-node:hover{border-color:rgba(212,175,55,.2);background:rgba(212,175,55,.04)}
+.tree-avi{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:.68rem;font-family:'Cinzel',serif;flex-shrink:0}
+.tree-info{flex:1;min-width:0}
+.tree-nm{font-weight:700;font-size:.84rem;color:var(--text-primary)}
+.tree-id{font-size:.69rem;color:var(--text-muted);font-family:monospace}
+.tree-children{padding-left:28px;border-left:1px solid rgba(255,255,255,.06);margin-left:17px;margin-top:4px;display:none}
+.tree-children.open{display:block}
+.tree-toggle{background:transparent;border:none;cursor:pointer;color:var(--text-muted);transition:transform .2s,color .2s;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:.62rem}
+.tree-toggle.open{transform:rotate(90deg);color:var(--gold-light)}
+
+/* ── RESET WARNING ── */
+.reset-warning{background:rgba(239,68,68,.06);border:1px solid rgba(239,68,68,.25);border-radius:10px;padding:14px 18px;margin-bottom:16px;font-size:.83rem;color:#fca5a5;line-height:1.7}
+.reset-warning strong{color:#f87171}
+/* [FIX 3] highlight what is preserved */
+.reset-preserved{background:rgba(16,185,129,.06);border:1px solid rgba(16,185,129,.2);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:.78rem;color:#6ee7b7;line-height:1.8}
+
+/* ── GEN ID BADGE ── */
+.gen-id-badge{background:rgba(212,175,55,.1);border:1px solid rgba(212,175,55,.2);border-radius:8px;padding:10px 14px;font-family:monospace;font-size:1.05rem;font-weight:700;color:var(--gold-light);letter-spacing:2px;text-align:center}
+
+/* ── TOAST ── */
+#toast{position:fixed;bottom:24px;right:24px;z-index:999999;padding:12px 20px;border-radius:10px;font-size:.84rem;font-weight:600;display:flex;align-items:center;gap:8px;box-shadow:0 16px 40px rgba(0,0,0,.5);transform:translateY(70px);opacity:0;transition:all .35s cubic-bezier(.34,1.56,.64,1);pointer-events:none;max-width:360px}
+#toast.show{transform:translateY(0);opacity:1}
+#toast.success{background:linear-gradient(135deg,rgba(5,46,22,.95),rgba(6,78,59,.95));border:1px solid rgba(16,185,129,.4);color:#6ee7b7}
+#toast.error{background:linear-gradient(135deg,rgba(69,10,10,.95),rgba(127,29,29,.95));border:1px solid rgba(239,68,68,.4);color:#fca5a5}
+#toast.warning{background:linear-gradient(135deg,rgba(92,67,8,.95),rgba(120,90,10,.95));border:1px solid rgba(212,175,55,.4);color:var(--gold-light)}
+
+/* ── SEARCH ── */
+.search-wrap{position:relative;max-width:280px}
+.search-wrap svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);opacity:.4;pointer-events:none}
+.search-input{background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.1);color:var(--text-primary);padding:9px 14px 9px 38px;border-radius:9px;font-family:'DM Sans',sans-serif;font-size:.83rem;width:100%;transition:border-color .2s}
+.search-input:focus{outline:none;border-color:rgba(212,175,55,.4)}
+.search-input::placeholder{color:var(--text-muted)}
+
+/* scrollbar */
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:var(--charcoal)}
+::-webkit-scrollbar-thumb{background:rgba(212,175,55,.2);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:rgba(212,175,55,.4)}
+</style>
+</head>
+<body>
+
+<!-- ================================================================
+     MODALS
+     ================================================================ -->
+
+<!-- [FIX 1] Add/Edit User Modal — with ID Mode Toggle -->
+<div class="modal-overlay" id="userModal">
+  <div class="modal-panel">
+    <div class="modal-hdr">
+      <div class="modal-title" id="userModalTitle">Add New Member</div>
+      <button class="modal-close" onclick="closeModal('userModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="um_mode">
+      <input type="hidden" id="um_originalId">
+
+      <!-- ID MODE — shown only in ADD mode -->
+      <div id="um_idSection" style="margin-bottom:16px">
+        <div class="form-label" style="margin-bottom:8px">Customer ID Mode</div>
+        <div class="id-mode-toggle">
+          <button class="id-mode-btn active" id="um_autoBtn" onclick="um_setIdMode('auto')">🤖 Auto Generate</button>
+          <button class="id-mode-btn" id="um_manualBtn" onclick="um_setIdMode('manual')">✏ Manual Entry</button>
+        </div>
+        <!-- AUTO mode: display generated ID -->
+        <div id="um_autoIdRow">
+          <div class="form-label" style="margin-bottom:6px">Generated ID</div>
+          <div class="gen-id-badge" id="um_genId">GG20100</div>
+        </div>
+        <!-- MANUAL mode: text input + validation -->
+        <div id="um_manualIdRow" style="display:none">
+          <div class="form-group" style="margin-bottom:4px">
+            <label class="form-label">Custom Customer ID</label>
+            <input type="text" id="um_manualId" class="form-input" placeholder="e.g. GG5999" oninput="um_validateManualId()">
+          </div>
+          <div class="id-error-msg" id="um_idError">⚠ Customer ID already exists. Please choose a unique ID.</div>
+        </div>
+      </div>
+
+      <!-- EDIT mode: shows current CID editable -->
+      <div id="um_cidGroup" style="display:none;margin-bottom:14px">
+        <div class="form-group">
+          <label class="form-label">Customer ID</label>
+          <input type="text" id="um_cid" class="form-input" placeholder="GG5091">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Full Name *</label>
+          <input type="text" id="um_name" class="form-input" placeholder="e.g. RAHUL SHARMA">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Sponsor (Upline) Customer ID</label>
+        <input type="text" id="um_sponsor" class="form-input" placeholder="Leave blank for root member">
+        <div id="um_sponsorPreview" style="font-size:.72rem;margin-top:4px;height:15px"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" style="color:#60A5FA">Direct Points</label>
+          <input type="number" id="um_dp" class="form-input" value="0" min="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="color:#34D399">First Orbit Points</label>
+          <input type="number" id="um_fop" class="form-input" value="0" min="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="color:#A78BFA">Second Orbit Points</label>
+          <input type="number" id="um_sop" class="form-input" value="0" min="0">
+        </div>
+      </div>
+      <div style="padding:10px 14px;border-radius:8px;background:rgba(212,175,55,.06);border:1px solid rgba(212,175,55,.12);display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:.78rem;color:var(--text-muted)">Total Points</span>
+        <span id="um_totalPreview" style="font-family:'Cinzel',serif;font-size:1.15rem;font-weight:700;background:linear-gradient(135deg,var(--gold-light),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent">0</span>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('userModal')">Cancel</button>
+      <button class="btn btn-green" onclick="saveUser()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        <span id="um_saveLabel">Add Member</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Points Manager Modal -->
+<div class="modal-overlay" id="ptsModal">
+  <div class="modal-panel">
+    <div class="modal-hdr">
+      <div class="modal-title">⚡ Update Points</div>
+      <button class="modal-close" onclick="closeModal('ptsModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="pm_memberInfo" style="margin-bottom:16px;padding:10px 14px;border-radius:10px;background:rgba(212,175,55,.06);border:1px solid rgba(212,175,55,.15)"></div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" style="color:#60A5FA">Direct Points</label>
+          <input type="number" id="pm_dp" class="form-input" min="0" oninput="pm_calcTotal()">
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="color:#34D399">First Orbit Points</label>
+          <input type="number" id="pm_fop" class="form-input" min="0" oninput="pm_calcTotal()">
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="color:#A78BFA">Second Orbit Points</label>
+          <input type="number" id="pm_sop" class="form-input" min="0" oninput="pm_calcTotal()">
+        </div>
+      </div>
+      <div style="padding:10px 14px;border-radius:8px;background:rgba(212,175,55,.06);border:1px solid rgba(212,175,55,.12);display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <span style="font-size:.78rem;color:var(--text-muted)">New Total Points</span>
+        <span id="pm_total" style="font-family:'Cinzel',serif;font-size:1.1rem;font-weight:700;background:linear-gradient(135deg,var(--gold-light),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent">0</span>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="pm_resetPoints()">🔄 Reset to 0</button>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('ptsModal')">Cancel</button>
+      <button class="btn btn-green" onclick="savePoints()">✓ Apply Points</button>
+    </div>
+  </div>
+</div>
+
+<!-- Delete Confirm Modal -->
+<div class="modal-overlay" id="deleteModal">
+  <div class="modal-panel" style="width:420px">
+    <div class="modal-hdr">
+      <div class="modal-title" style="background:linear-gradient(135deg,#fca5a5,#ef4444);-webkit-background-clip:text;background-clip:text;color:transparent">⚠ Confirm Delete</div>
+      <button class="modal-close" onclick="closeModal('deleteModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="reset-warning">
+        You are about to delete <strong id="del_name"></strong> (<span id="del_id" style="font-family:monospace"></span>).<br>
+        Their direct recruits will become <strong>root members</strong>. This cannot be undone.
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('deleteModal')">Cancel</button>
+      <button class="btn btn-red" onclick="confirmDelete()">🗑 Delete Member</button>
+    </div>
+  </div>
+</div>
+
+<!-- Orbit Viewer Modal (admin) -->
+<div class="modal-overlay" id="orbitModal">
+  <div class="modal-panel" style="width:640px">
+    <div class="modal-hdr">
+      <div>
+        <div class="modal-title" id="om_name">Orbit View</div>
+        <div style="font-family:monospace;font-size:.75rem;color:var(--text-muted)" id="om_cid"></div>
+      </div>
+      <button class="modal-close" onclick="closeModal('orbitModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+        <div class="orb-chip">🌱 <strong id="om_d">0</strong> Direct</div>
+        <div class="orb-chip">🌐 <strong id="om_s">0</strong> 2nd Orbit</div>
+        <div class="orb-chip">⭐ <strong id="om_p">0</strong> Total Pts</div>
+      </div>
+      <div class="orb-tabs">
+        <button class="orb-tab active" id="ot1" onclick="om_switchTab(1)">🌱 First Orbit</button>
+        <button class="orb-tab" id="ot2" onclick="om_switchTab(2)">🌐 Second Orbit</button>
+      </div>
+      <div id="om_body" style="max-height:360px;overflow-y:auto"></div>
+    </div>
+  </div>
+</div>
+
+<!-- [FIX 2] Change Sponsor Modal -->
+<div class="modal-overlay" id="sponsorModal">
+  <div class="modal-panel" style="width:440px">
+    <div class="modal-hdr">
+      <div class="modal-title">🔀 Change Sponsor / Move User</div>
+      <button class="modal-close" onclick="closeModal('sponsorModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="sm_memberInfo" style="margin-bottom:16px;padding:10px 14px;border-radius:10px;background:rgba(212,175,55,.06);border:1px solid rgba(212,175,55,.15)"></div>
+      <div class="form-group">
+        <label class="form-label">New Sponsor Customer ID</label>
+        <input type="text" id="sm_newSponsor" class="form-input" placeholder="Leave blank to make this a root member" oninput="sm_previewSponsor()">
+        <div id="sm_sponsorPreview" style="font-size:.73rem;margin-top:5px;min-height:16px"></div>
+      </div>
+      <div style="font-size:.78rem;color:var(--text-muted);padding:8px 12px;background:rgba(96,165,250,.06);border:1px solid rgba(96,165,250,.15);border-radius:8px">
+        ⚠ Moving a user will update their position in the Team Tree instantly. Sponsor relationships up and down the chain are preserved.
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('sponsorModal')">Cancel</button>
+      <button class="btn btn-green" onclick="saveSponsorChange()">✓ Move Member</button>
+    </div>
+  </div>
+</div>
+
+<!-- [FIX 3] Monthly Reset Modal — only resets points -->
+<div class="modal-overlay" id="resetModal">
+  <div class="modal-panel" style="width:460px">
+    <div class="modal-hdr">
+      <div class="modal-title" style="background:linear-gradient(135deg,#fca5a5,#ef4444);-webkit-background-clip:text;background-clip:text;color:transparent">🔄 Monthly Points Reset</div>
+      <button class="modal-close" onclick="closeModal('resetModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="reset-warning">
+        This will reset <strong>ALL POINTS</strong> for every member to zero and recalculate the leaderboard.<br>
+        <strong>Requires admin password to confirm.</strong>
+      </div>
+      <!-- [FIX 3] Clearly state what is NOT reset -->
+      <div class="reset-preserved">
+        ✅ <strong>Preserved (NOT reset):</strong><br>
+        · All members &amp; Customer IDs<br>
+        · Sponsor / upline relationships<br>
+        · Team Tree structure<br>
+        · Entire network hierarchy
+      </div>
+      <div class="form-group">
+        <label class="form-label">Admin Password</label>
+        <input type="password" id="resetPwd" class="form-input" placeholder="Enter password to confirm">
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal('resetModal')">Cancel</button>
+      <button class="btn btn-red" onclick="confirmReset()">🔄 Reset Points Only</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<!-- ================================================================
+     SHELL
+     ================================================================ -->
+<div class="admin-shell">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-logo">
+        <div class="brand-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="8"/><line x1="12" y1="16" x2="12" y2="22"/><line x1="2" y1="12" x2="8" y2="12"/><line x1="16" y1="12" x2="22" y2="12"/></svg>
+        </div>
+        <div><div class="brand-name">GROWBIT</div><div class="brand-sub">Admin Panel v2</div></div>
+      </div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section-label">Dashboard</div>
+      <button class="nav-item active" id="nav-dashboard" onclick="switchPage('dashboard',this)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        Overview
+      </button>
+      <div class="nav-section-label">Members</div>
+      <button class="nav-item" id="nav-users" onclick="switchPage('users',this)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        User Management
+      </button>
+      <button class="nav-item" id="nav-points" onclick="switchPage('points',this)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        Points Manager
+      </button>
+      <button class="nav-item" id="nav-tree" onclick="switchPage('tree',this)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="2" x2="12" y2="8"/><polyline points="8 12 12 8 16 12"/><rect x="2" y="14" width="6" height="6"/><rect x="9" y="14" width="6" height="6"/><rect x="16" y="14" width="6" height="6"/><line x1="5" y1="14" x2="5" y2="11"/><line x1="12" y1="14" x2="12" y2="11"/><line x1="19" y1="14" x2="19" y2="11"/><line x1="5" y1="11" x2="19" y2="11"/></svg>
+        Team Tree
+      </button>
+      <div class="nav-section-label">System</div>
+      <button class="nav-item" id="nav-leaderboard" onclick="switchPage('leaderboard',this)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg>
+        Leaderboard
+      </button>
+      <button class="nav-item" onclick="openResetModal()" style="color:#f87171">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.5"/></svg>
+        Monthly Reset
+      </button>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="admin-badge"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>ADMIN ACCESS</div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <div style="flex:1;display:flex;flex-direction:column">
+    <div class="topbar">
+      <div class="topbar-title" id="topbarTitle">Dashboard Overview</div>
+      <div class="topbar-actions">
+        <span style="font-size:.75rem;color:var(--text-muted)" id="lastSavedLabel">Data synced</span>
+        <a href="growbit_public.html" target="_blank" class="btn btn-gold btn-sm">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          View Public Page
+        </a>
+      </div>
+    </div>
+
+    <!-- PAGE: DASHBOARD -->
+    <div id="page-dashboard" class="admin-page active">
+      <div class="sec-title">📊 Dashboard Overview</div>
+      <div class="sec-sub">System-wide stats — updates instantly when points change</div>
+      <!-- [FIX 4] Stats update automatically -->
+      <div class="card-grid">
+        <div class="stat-card"><div class="stat-val" id="dash_total">0</div><div class="stat-label">Total Members</div></div>
+        <div class="stat-card"><div class="stat-val" id="dash_pts">0</div><div class="stat-label">Total Network Points</div></div>
+        <div class="stat-card"><div class="stat-val" id="dash_teamSupport">0</div><div class="stat-label">Team Support Points</div></div>
+        <div class="stat-card"><div class="stat-val" id="dash_roots">0</div><div class="stat-label">Root Members</div></div>
+      </div>
+      <div class="card" style="margin-bottom:20px">
+        <div style="font-family:'Cinzel',serif;font-size:.9rem;color:var(--gold);margin-bottom:14px;text-transform:uppercase;letter-spacing:1.5px">🏆 Top 5 Members</div>
+        <div id="dash_top5"></div>
+      </div>
+      <div class="card">
+        <div style="font-family:'Cinzel',serif;font-size:.9rem;color:var(--gold);margin-bottom:14px;text-transform:uppercase;letter-spacing:1.5px">🌳 Network Summary</div>
+        <div id="dash_net" style="font-size:.85rem;color:var(--text-muted);line-height:2"></div>
+      </div>
+    </div>
+
+    <!-- PAGE: USER MANAGEMENT -->
+    <div id="page-users" class="admin-page">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
+        <div><div class="sec-title">👥 User Management</div><div class="sec-sub">Add, edit, delete members · change sponsor · manage uplines</div></div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <div class="search-wrap">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            <input type="text" class="search-input" id="usersSearch" placeholder="Search name or ID…" oninput="renderUsersTable()">
+          </div>
+          <button class="btn btn-green" onclick="openAddUser()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add Member
+          </button>
+        </div>
+      </div>
+      <div class="card" style="padding:0">
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr>
+              <th>Rank</th><th>Name</th><th>Customer ID</th><th>Sponsor</th>
+              <th>Direct Rec.</th><th style="color:#60A5FA">Direct Pts</th>
+              <th style="color:#34D399">1st Orbit Pts</th><th style="color:#A78BFA">2nd Orbit Pts</th>
+              <th class="gold">Total Pts</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="usersBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- PAGE: POINTS MANAGER -->
+    <div id="page-points" class="admin-page">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
+        <div><div class="sec-title">⚡ Points Manager</div><div class="sec-sub">Edit points — global stats auto-update instantly</div></div>
+        <div class="search-wrap">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input type="text" class="search-input" id="ptsSearch" placeholder="Search member…" oninput="renderPointsTable()">
+        </div>
+      </div>
+      <div class="card" style="padding:0">
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr>
+              <th>Rank</th><th>Name</th><th>Customer ID</th>
+              <th style="color:#60A5FA">Direct Pts</th>
+              <th style="color:#34D399">1st Orbit Pts</th>
+              <th style="color:#A78BFA">2nd Orbit Pts</th>
+              <th class="gold">Total Pts</th><th>Edit</th>
+            </tr></thead>
+            <tbody id="ptsBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- PAGE: TEAM TREE -->
+    <div id="page-tree" class="admin-page">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
+        <div><div class="sec-title">🌳 Team Tree Manager</div><div class="sec-sub">Full hierarchy · expand nodes · change sponsor · view orbits</div></div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <div class="search-wrap">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            <input type="text" class="search-input" id="treeSearch" placeholder="Search member…" oninput="filterTree(this.value)">
+          </div>
+          <button class="btn btn-green btn-sm" onclick="openAddUser()">+ Add Member</button>
+        </div>
+      </div>
+      <div class="card">
+        <div id="treeBody" style="max-height:660px;overflow-y:auto"></div>
+      </div>
+    </div>
+
+    <!-- PAGE: LEADERBOARD -->
+    <div id="page-leaderboard" class="admin-page">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
+        <div><div class="sec-title">🏆 Leaderboard (Admin View)</div><div class="sec-sub">Sorted by total points — open rows stay open during refresh</div></div>
+        <div class="search-wrap">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input type="text" class="search-input" id="lbSearch" placeholder="Search…" oninput="renderLBTable()">
+        </div>
+      </div>
+      <div class="card" style="padding:0">
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr>
+              <th>Rank</th><th>Name</th><th>Customer ID</th><th>Direct Rec.</th>
+              <th style="color:#60A5FA">Direct Pts</th><th style="color:#34D399">1st Orbit Pts</th>
+              <th style="color:#A78BFA">2nd Orbit Pts</th><th class="gold">Total Pts</th>
+            </tr></thead>
+            <tbody id="lbBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /main -->
+</div><!-- /shell -->
+
+<script>
+// ================================================================
+// SHARED STORAGE KEY
+// ================================================================
+var LS_KEY = 'growbit_data';
+var RESET_PASSWORD = 'admin123'; // Change before production
+
+// [FIX 7] Sorted cache — invalidated on data change
+var _sortedCache = null;
+function invalidateCache() { _sortedCache = null; }
+function getSorted() {
+  if (_sortedCache) return _sortedCache;
+  _sortedCache = STATE.members.slice().sort(function(a,b){ return totalPts(b)-totalPts(a); });
+  return _sortedCache;
+}
+
+// ================================================================
+// SEED DATA (132 members with full sponsor hierarchy)
+// ================================================================
+var SEED_MEMBERS = [
+  {name:"BHAIYA LAL VERMA",customerId:"GG5091",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"DHAL SINGH VERMA",customerId:"GG5098",sponsorId:"GG5091",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"Ashwant",customerId:"GG5013",sponsorId:"GG5091",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"SUNITA NIRMALKAR",customerId:"GG5097",sponsorId:"GG5091",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"Abdhesh Kushawaha",customerId:"GG5010",sponsorId:"GG5098",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"MD PARVEZ",customerId:"GG5025",sponsorId:"GG5098",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"TAHAL SINGH NIRMALKAR",customerId:"GG5129",sponsorId:"GG5098",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"DAMINI SAHU",customerId:"GG5093",sponsorId:"GG5013",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"ROHIT KUMAR JANGHEL",customerId:"GG5134",sponsorId:"GG5013",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"Gulshan kumar sahu",customerId:"GG5016",sponsorId:"GG5013",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"BHOLARAM SAHU",customerId:"GG5139",sponsorId:"GG5097",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"LEKH RAM SAHU",customerId:"GG5146",sponsorId:"GG5097",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"SUSHMA YADAV",customerId:"GG5102",sponsorId:"GG5010",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"TIKESHWARI KHARE",customerId:"GG5094",sponsorId:"GG5010",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"DUKHHARAN NISHAD",customerId:"GG5084",sponsorId:"GG5025",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"NEHA VERMA",customerId:"GG5081",sponsorId:"GG5025",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"UTTARA BAI THANAVAR SAHU",customerId:"GG5133",sponsorId:"GG5129",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"VIJAY KUMAR SAHU",customerId:"GG5089",sponsorId:"GG5129",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"Lalchand Sahu",customerId:"GG5014",sponsorId:"GG5093",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"BHARAT NISHAD",customerId:"GG5054",sponsorId:"GG5093",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"Duleshwar kumar rajak",customerId:"GG5022",sponsorId:"GG5134",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"VINEETA PAL",customerId:"GG5118",sponsorId:"GG5134",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"Padum lal sahu",customerId:"GG5029",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"Sonbati",customerId:"GG5018",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"KANTI THAKUR",customerId:"GG5058",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"Bina Dewangan",customerId:"GG5017",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"Rizwan Khan",customerId:"GG5015",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"Komin Sahu",customerId:"GG5032",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"TRASIT DEWANGAN",customerId:"GG5043",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"Jageshwari Sahu",customerId:"GG5011",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"KALYANI NISHAD",customerId:"GG5042",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"UTTAM Sapha",customerId:"GG5039",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"Upendra Deshmukh",customerId:"GG5031",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"PRAVIN KUMAR PAUSARYA",customerId:"GG5060",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"DEEPAK DEWANGAN",customerId:"GG5053",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"LAXMI THAKUR",customerId:"GG5059",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"kusumlatha",customerId:"GG5027",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"Chandrakala",customerId:"GG5024",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"PRADIP KUMAR",customerId:"GG5046",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"OKESH DHANKAR",customerId:"GG5077",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"Dhamin Sahu",customerId:"GG5034",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"BED BAI YADAV",customerId:"GG5037",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"MANOJ KUMAR",customerId:"GG5036",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"Abdul Aziz Mondal",customerId:"GG5012",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"prema",customerId:"GG5019",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"KEJA BAI",customerId:"GG5020",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"Chitrekha sahu",customerId:"GG5021",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"Girja bai",customerId:"GG5023",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"Haridash khuswaha",customerId:"GG5026",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"SUMAN KUSHWAHA",customerId:"GG5035",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"UDASA BAI DEWANGAN",customerId:"GG5038",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"Gaindi Sapha",customerId:"GG5033",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"RUPA SAHU",customerId:"GG5128",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"DULARI BAI DESHMUKH",customerId:"GG5040",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"ANUSUIYA BAI",customerId:"GG5041",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"SARASVATI SONI",customerId:"GG5044",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"RAJNI BAI",customerId:"GG5045",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"TIKESHWAR CHANDRAKAR",customerId:"GG5047",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"SANTOSHI",customerId:"GG5048",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"PUNAM NISHAD",customerId:"GG5049",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"RITU SAHU",customerId:"GG5050",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"BHOJ RAM SAHU",customerId:"GG5051",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"RAVINDRA KUMAR",customerId:"GG5052",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"KIRAN THAKUR",customerId:"GG5055",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"SHARDA SAHU",customerId:"GG5056",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"LALESHWARI SAHU",customerId:"GG5057",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"POOJA DEWANGAN",customerId:"GG5061",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"RENUKA",customerId:"GG5062",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"MAJUM",customerId:"GG5063",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"RAJKUMARI TANDAN",customerId:"GG5064",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"MOHIT KUSHWAH",customerId:"GG5065",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"MOTIN BAI",customerId:"GG5066",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"LEELA THAKUR",customerId:"GG5067",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"JAGRITI SAHU",customerId:"GG5068",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"DHANESHWAR",customerId:"GG5069",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"KHEMAN THAKUR",customerId:"GG5070",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"AHILYA DESHMUKH",customerId:"GG5071",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"MINA THAKUR",customerId:"GG5072",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"FULESHWARI YADAV",customerId:"GG5073",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"MANOJ YADAV",customerId:"GG5074",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"ANITA DEWANGAN",customerId:"GG5075",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"SHARDA BAI DHOBI",customerId:"GG5076",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"KUMARI BAI DHIWAR",customerId:"GG5078",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"UPREKHA THAKUR",customerId:"GG5079",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"SURJA BAI SAHU",customerId:"GG5080",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"KIRAN SAHU",customerId:"GG5082",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"CHHAYA SAHU",customerId:"GG5083",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"DEVKI YADAV",customerId:"GG5085",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"ASHWANI SAHU",customerId:"GG5086",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"HEMANT YADAV",customerId:"GG5087",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"GOVIND PAL",customerId:"GG5088",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"GAYATRI SAHU",customerId:"GG5090",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"JAIN KUMAR SAHU",customerId:"GG5092",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"RAMESH KUMAR SAHU",customerId:"GG5103",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"TEENA DEWANGAN",customerId:"GG5105",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"SUSHIL SAHU",customerId:"GG5099",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"BINDIYA NISAD",customerId:"GG5110",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"AJAY PATEL",customerId:"GG5111",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"RANJITA WADKAR",customerId:"GG5096",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"DHANESHVARI VARMA",customerId:"GG5104",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"ASLAM",customerId:"GG5112",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"HIMANSHU PATEL",customerId:"GG5113",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"ARJUN SAROJ",customerId:"GG5114",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"SANTOSH KUMAR NAGWANSHI",customerId:"GG5115",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"NEESHU DHANGAR",customerId:"GG5119",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"YAMAN KUMAR SAHU",customerId:"GG5120",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"AFROZ",customerId:"GG5117",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"SARSWATI BAI BAGHEL",customerId:"GG5121",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"PAVANREKHA BHUARYA",customerId:"GG5122",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"SHISHUPAL",customerId:"GG5123",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"KHILAVAN KUMAR VERMA",customerId:"GG5132",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"SHUBHAM AMBADE",customerId:"GG5124",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"RAJESH PANDIT",customerId:"GG5131",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"SUNIL PAL",customerId:"GG5130",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"INDRA KUMAR SAHU",customerId:"GG5116",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"TULA RAM YADAV",customerId:"GG5135",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"NURJAHAN BANU",customerId:"GG5136",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"AKANKSHA MASIH",customerId:"GG5137",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"MANJU YADAV",customerId:"GG5138",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"DURGESH KUMAR",customerId:"GG5125",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"MANSINGH SAHU",customerId:"GG5140",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"LAXMI",customerId:"GG5095",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"AJAY TIWARI",customerId:"GG5141",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"ROHIT KUMAR PATEL",customerId:"GG5100",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"FAHIMUR RAHMAN",customerId:"GG5108",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"KHELENDRA KUMAR VERMA",customerId:"GG5142",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"HASEENA BEGAM ANSARI",customerId:"GG5143",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"NAFISHA BEE",customerId:"GG5144",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"BHAVESH KUMAR",customerId:"GG5145",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"RUKHMANI",customerId:"GG5147",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0},
+  {name:"RAKESH KUMAR",customerId:"GG5148",sponsorId:"",directPoints:0,firstOrbitPoints:0,secondOrbitPoints:0}
+];
+
+// ================================================================
+// STATE & STORAGE
+// ================================================================
+var STATE = { members:[], idCounter:20100 };
+
+function loadState() {
+  try {
+    var raw = localStorage.getItem(LS_KEY);
+    if (raw) {
+      var p = JSON.parse(raw);
+      STATE.members = p.members || [];
+      STATE.idCounter = p.idCounter || 20100;
+    } else {
+      STATE.members = JSON.parse(JSON.stringify(SEED_MEMBERS));
+      STATE.idCounter = 20100;
+      saveState();
+    }
+  } catch(e) {
+    STATE.members = JSON.parse(JSON.stringify(SEED_MEMBERS));
+    STATE.idCounter = 20100;
+  }
+  invalidateCache();
+}
+
+// [FIX 6] debounced save — avoids flooding localStorage on rapid edits
+var _saveTimer = null;
+function saveState(immediate) {
+  if (immediate) { _doSave(); return; }
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(_doSave, 120);
+}
+function _doSave() {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(STATE));
+    var el = document.getElementById('lastSavedLabel');
+    if (el) el.textContent = 'Saved ' + new Date().toLocaleTimeString();
+  } catch(e) { console.warn('localStorage save failed', e); }
+}
+
+// ================================================================
+// [FIX 1] ID GENERATOR — AUTO + MANUAL MODES
+// ================================================================
+var _idMode = 'auto'; // 'auto' | 'manual'
+
+function um_setIdMode(mode) {
+  _idMode = mode;
+  document.getElementById('um_autoBtn').classList.toggle('active', mode==='auto');
+  document.getElementById('um_manualBtn').classList.toggle('active', mode==='manual');
+  document.getElementById('um_autoIdRow').style.display  = mode==='auto'   ? '' : 'none';
+  document.getElementById('um_manualIdRow').style.display = mode==='manual' ? '' : 'none';
+  if (mode==='auto') {
+    document.getElementById('um_genId').textContent = peekNextId();
+  } else {
+    document.getElementById('um_manualId').value = '';
+    document.getElementById('um_idError').classList.remove('show');
+    document.getElementById('um_manualId').classList.remove('input-error');
+  }
+}
+
+// Live duplicate check for manual ID entry
+function um_validateManualId() {
+  var raw = document.getElementById('um_manualId').value.trim().toUpperCase();
+  var errEl = document.getElementById('um_idError');
+  var inp   = document.getElementById('um_manualId');
+  if (!raw) { errEl.classList.remove('show'); inp.classList.remove('input-error'); return true; }
+  var exists = !!memberById(raw);
+  errEl.classList.toggle('show', exists);
+  inp.classList.toggle('input-error', exists);
+  return !exists;
+}
+
+// Generate next auto ID — scans used set, never duplicates
+function nextAutoId() {
+  var usedIds = new Set(STATE.members.map(function(m){ return m.customerId; }));
+  while (usedIds.has('GG' + STATE.idCounter)) STATE.idCounter++;
+  var id = 'GG' + STATE.idCounter;
+  STATE.idCounter++;
+  return id;
+}
+function peekNextId() {
+  var usedIds = new Set(STATE.members.map(function(m){ return m.customerId; }));
+  var c = STATE.idCounter;
+  while (usedIds.has('GG' + c)) c++;
+  return 'GG' + c;
+}
+
+// ================================================================
+// CORE HELPERS
+// ================================================================
+function memberById(id) {
+  if (!id) return null;
+  return STATE.members.find(function(m){ return m.customerId===id; })||null;
+}
+function initials(nm) {
+  return nm.trim().split(/\s+/).map(function(w){ return w[0]||''; }).slice(0,2).join('').toUpperCase();
+}
+function totalPts(m) {
+  return (m.directPoints||0)+(m.firstOrbitPoints||0)+(m.secondOrbitPoints||0);
+}
+// [FIX 4] Compute aggregate stats in one pass
+function computeStats() {
+  var totalNetwork=0, teamSupport=0, linked=0, roots=0;
+  STATE.members.forEach(function(m){
+    totalNetwork += totalPts(m);
+    teamSupport  += (m.firstOrbitPoints||0)+(m.secondOrbitPoints||0);
+    if (m.sponsorId) linked++; else roots++;
+  });
+  return { totalNetwork:totalNetwork, teamSupport:teamSupport, linked:linked, roots:roots, count:STATE.members.length };
+}
+function getOrbit1(id) { return STATE.members.filter(function(m){ return m.sponsorId===id; }); }
+function getOrbit2(id) {
+  var r=[];
+  getOrbit1(id).forEach(function(c){ getOrbit1(c.customerId).forEach(function(g){ r.push({member:g,via:c}); }); });
+  return r;
+}
+function directRecruitCount(id) { return STATE.members.filter(function(m){ return m.sponsorId===id; }).length; }
+
+// ================================================================
+// TOAST
+// ================================================================
+function toast(msg, type) {
+  var el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show '+(type||'success');
+  clearTimeout(el._t);
+  el._t = setTimeout(function(){ el.classList.remove('show'); }, 3400);
+}
+
+// ================================================================
+// MODAL HELPERS
+// ================================================================
+function openModal(id)  { document.getElementById(id).classList.add('open');    document.body.style.overflow='hidden'; }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); document.body.style.overflow='auto';   }
+document.querySelectorAll('.modal-overlay').forEach(function(el){
+  el.addEventListener('click', function(e){ if(e.target===this) closeModal(this.id); });
+});
+
+// ================================================================
+// PAGE NAVIGATION
+// ================================================================
+var PAGE_TITLES = {
+  dashboard:'Dashboard Overview', users:'User Management',
+  points:'Points Manager', tree:'Team Tree Manager', leaderboard:'Leaderboard'
+};
+function switchPage(name, btn) {
+  document.querySelectorAll('.admin-page').forEach(function(p){ p.classList.remove('active'); });
+  document.getElementById('page-'+name).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(function(n){ n.classList.remove('active'); });
+  if (btn) btn.classList.add('active');
+  document.getElementById('topbarTitle').textContent = PAGE_TITLES[name]||'';
+  if (name==='dashboard')   renderDashboard();
+  if (name==='users')       renderUsersTable();
+  if (name==='points')      renderPointsTable();
+  if (name==='tree')        renderTree();
+  if (name==='leaderboard') renderLBTable();
+}
+
+// ================================================================
+// [FIX 4] GLOBAL STATS — auto-update after every change
+// Called after saveState to keep all stat widgets current
+// ================================================================
+function updateGlobalStats() {
+  var s = computeStats();
+  // Dashboard stats (if visible)
+  var el;
+  el = document.getElementById('dash_total');       if(el) el.textContent = s.count;
+  el = document.getElementById('dash_pts');         if(el) el.textContent = s.totalNetwork;
+  el = document.getElementById('dash_teamSupport'); if(el) el.textContent = s.teamSupport;
+  el = document.getElementById('dash_roots');       if(el) el.textContent = s.roots;
+  el = document.getElementById('dash_net');
+  if (el) el.innerHTML = '📌 Total: <strong style="color:var(--text-primary)">'+s.count+'</strong> &nbsp;·&nbsp; 🔗 Linked: <strong style="color:#34D399">'+s.linked+'</strong> &nbsp;·&nbsp; 🌱 Root: <strong style="color:#60A5FA">'+s.roots+'</strong> &nbsp;·&nbsp; ⭐ Network Pts: <strong style="color:var(--gold-light)">'+s.totalNetwork+'</strong> &nbsp;·&nbsp; 🤝 Team Support: <strong style="color:#A78BFA">'+s.teamSupport+'</strong>';
+}
+
+// ================================================================
+// DASHBOARD
+// ================================================================
+function renderDashboard() {
+  updateGlobalStats();
+  // Top 5
+  var sorted = getSorted().slice(0,5);
+  var html='';
+  ['🥇','🥈','🥉','4️⃣','5️⃣'].forEach(function(medal,i){
+    if (!sorted[i]) return;
+    var m=sorted[i];
+    html+='<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.04)">'+
+      '<span style="font-size:1.2rem">'+medal+'</span>'+
+      '<div style="flex:1"><div style="font-weight:700;font-size:.88rem">'+m.name+'</div><div style="font-family:monospace;font-size:.7rem;color:var(--text-muted)">'+m.customerId+'</div></div>'+
+      '<div style="font-family:\'Cinzel\',serif;font-weight:700;background:linear-gradient(135deg,var(--gold-light),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent">'+totalPts(m)+' pts</div>'+
+    '</div>';
+  });
+  document.getElementById('dash_top5').innerHTML = html || '<div style="color:var(--text-muted);font-size:.84rem">No members yet</div>';
+}
+
+// ================================================================
+// USER MANAGEMENT TABLE
+// ================================================================
+function renderUsersTable() {
+  var q = (document.getElementById('usersSearch').value||'').toLowerCase();
+  var sorted = getSorted();
+  var filtered = q ? sorted.filter(function(m){ return m.name.toLowerCase().includes(q)||m.customerId.toLowerCase().includes(q); }) : sorted;
+  var frag = document.createDocumentFragment();
+  var tb = document.getElementById('usersBody');
+  filtered.forEach(function(m, i) {
+    var rank = sorted.indexOf(m)+1;
+    var rBadge = rank===1?'<span class="rank-badge medal-gold">1</span>':rank===2?'<span class="rank-badge medal-silver">2</span>':rank===3?'<span class="rank-badge medal-bronze">3</span>':'<span style="color:var(--text-muted);font-size:.78rem;font-weight:700">'+rank+'</span>';
+    var sponsor = memberById(m.sponsorId);
+    var tp = totalPts(m);
+    var tr = document.createElement('tr');
+    tr.className = 'row-anim';
+    tr.style.animationDelay = Math.min(i*8,400)+'ms';
+    tr.innerHTML =
+      '<td>'+rBadge+'</td>'+
+      '<td><span style="font-weight:600;color:var(--text-primary)">'+m.name+'</span></td>'+
+      '<td><span class="cid-mono">'+m.customerId+'</span></td>'+
+      '<td><span style="font-size:.78rem;color:'+(sponsor?'var(--emerald-light)':'var(--text-muted)')+'">'+
+        (sponsor ? sponsor.name.split(' ')[0]+' ('+m.sponsorId+')' : '— Root')+'</span></td>'+
+      '<td><span class="tag tag-blue">'+directRecruitCount(m.customerId)+' recruits</span></td>'+
+      '<td class="pts-blue">'+m.directPoints+'</td>'+
+      '<td class="pts-teal">'+m.firstOrbitPoints+'</td>'+
+      '<td class="pts-purple">'+m.secondOrbitPoints+'</td>'+
+      '<td class="pts-gold">'+tp+'</td>'+
+      '<td><div class="action-cell">'+
+        '<button class="btn btn-gold btn-xs" onclick="openEditUser(\''+m.customerId+'\')">✏</button>'+
+        '<button class="btn btn-blue btn-xs" onclick="openSponsorModal(\''+m.customerId+'\')">🔀</button>'+
+        '<button class="btn btn-ghost btn-xs" onclick="openOrbitModal(\''+m.customerId+'\')">🌐</button>'+
+        '<button class="btn btn-red btn-xs" onclick="openDeleteModal(\''+m.customerId+'\')">🗑</button>'+
+      '</div></td>';
+    frag.appendChild(tr);
+  });
+  var tb = document.getElementById('usersBody');
+  tb.innerHTML='';
+  tb.appendChild(frag);
+  if (!filtered.length) tb.innerHTML='<tr><td colspan="10" style="text-align:center;padding:24px;color:var(--text-muted)">No members found</td></tr>';
+}
+
+// ================================================================
+// [FIX 1] ADD / EDIT USER — with ID mode toggle
+// ================================================================
+function openAddUser() {
+  document.getElementById('um_mode').value = 'add';
+  document.getElementById('userModalTitle').textContent = 'Add New Member';
+  document.getElementById('um_saveLabel').textContent = 'Add Member';
+  document.getElementById('um_idSection').style.display = '';
+  document.getElementById('um_cidGroup').style.display = 'none';
+  um_setIdMode('auto'); // default to auto
+  document.getElementById('um_name').value = '';
+  document.getElementById('um_sponsor').value = '';
+  document.getElementById('um_sponsorPreview').textContent = '';
+  document.getElementById('um_dp').value = 0;
+  document.getElementById('um_fop').value = 0;
+  document.getElementById('um_sop').value = 0;
+  um_calcTotal();
+  openModal('userModal');
+}
+
+function openEditUser(cid) {
+  var m = memberById(cid);
+  if (!m) return;
+  document.getElementById('um_mode').value = 'edit';
+  document.getElementById('um_originalId').value = cid;
+  document.getElementById('userModalTitle').textContent = 'Edit — '+m.name;
+  document.getElementById('um_saveLabel').textContent = 'Save Changes';
+  document.getElementById('um_idSection').style.display = 'none';
+  document.getElementById('um_cidGroup').style.display = '';
+  document.getElementById('um_cid').value = cid;
+  document.getElementById('um_name').value = m.name;
+  document.getElementById('um_sponsor').value = m.sponsorId||'';
+  var sp = memberById(m.sponsorId);
+  document.getElementById('um_sponsorPreview').textContent = sp?'✓ '+sp.name:(m.sponsorId?'⚠ Not found':'(Root)');
+  document.getElementById('um_sponsorPreview').style.color = sp?'#34D399':'#A78BFA';
+  document.getElementById('um_dp').value  = m.directPoints||0;
+  document.getElementById('um_fop').value = m.firstOrbitPoints||0;
+  document.getElementById('um_sop').value = m.secondOrbitPoints||0;
+  um_calcTotal();
+  openModal('userModal');
+}
+
+document.getElementById('um_sponsor').addEventListener('input', function(){
+  var sid=this.value.trim().toUpperCase();
+  var prev=document.getElementById('um_sponsorPreview');
+  if(!sid){prev.textContent='(Root — no sponsor)';prev.style.color='var(--text-muted)';return;}
+  var sp=memberById(sid);
+  prev.textContent=sp?'✓ Sponsor: '+sp.name:'⚠ ID not found';
+  prev.style.color=sp?'#34D399':'#f87171';
+});
+['um_dp','um_fop','um_sop'].forEach(function(id){
+  document.getElementById(id).addEventListener('input',um_calcTotal);
+});
+function um_calcTotal(){
+  var dp=parseInt(document.getElementById('um_dp').value)||0;
+  var fop=parseInt(document.getElementById('um_fop').value)||0;
+  var sop=parseInt(document.getElementById('um_sop').value)||0;
+  document.getElementById('um_totalPreview').textContent=dp+fop+sop;
+}
+
+function saveUser(){
+  var mode=document.getElementById('um_mode').value;
+  var name=document.getElementById('um_name').value.trim();
+  if(!name){toast('⚠ Name is required','error');return;}
+  var sponsorRaw=document.getElementById('um_sponsor').value.trim().toUpperCase();
+  if(sponsorRaw&&!memberById(sponsorRaw)){toast('⚠ Sponsor ID not found: '+sponsorRaw,'error');return;}
+  var dp=parseInt(document.getElementById('um_dp').value)||0;
+  var fop=parseInt(document.getElementById('um_fop').value)||0;
+  var sop=parseInt(document.getElementById('um_sop').value)||0;
+
+  if(mode==='add'){
+    // [FIX 1] Determine ID based on selected mode
+    var newId;
+    if(_idMode==='manual'){
+      if(!um_validateManualId()){toast('⚠ Customer ID already exists. Please choose a unique ID.','error');return;}
+      var raw=document.getElementById('um_manualId').value.trim().toUpperCase();
+      if(!raw){toast('⚠ Please enter a Customer ID','error');return;}
+      newId=raw;
+    } else {
+      newId=nextAutoId();
+    }
+    // Final duplicate guard (race condition safety)
+    if(memberById(newId)){toast('⚠ Customer ID "'+newId+'" already exists. Please choose a unique ID.','error');return;}
+    STATE.members.push({name:name,customerId:newId,sponsorId:sponsorRaw,directPoints:dp,firstOrbitPoints:fop,secondOrbitPoints:sop});
+    invalidateCache();
+    saveState(true);
+    closeModal('userModal');
+    toast('✓ Member added: '+name+' ('+newId+')','success');
+  } else {
+    var origId=document.getElementById('um_originalId').value;
+    var newCid=document.getElementById('um_cid').value.trim().toUpperCase()||origId;
+    var m=memberById(origId);
+    if(!m){toast('⚠ Member not found','error');return;}
+    if(sponsorRaw===newCid){toast('⚠ A member cannot sponsor themselves','error');return;}
+    // [FIX 1] CID change duplicate check
+    if(newCid!==origId&&memberById(newCid)){toast('⚠ Customer ID "'+newCid+'" already exists. Please choose a unique ID.','error');return;}
+    m.name=name; m.sponsorId=sponsorRaw;
+    m.directPoints=dp; m.firstOrbitPoints=fop; m.secondOrbitPoints=sop;
+    if(newCid!==origId){
+      STATE.members.forEach(function(x){if(x.sponsorId===origId)x.sponsorId=newCid;});
+      m.customerId=newCid;
+    }
+    invalidateCache();
+    saveState(true);
+    closeModal('userModal');
+    toast('✓ Member updated: '+name,'success');
+  }
+  // [FIX 4] Stats update immediately after save
+  updateGlobalStats();
+  refreshAll();
+}
+
+// ================================================================
+// DELETE USER
+// ================================================================
+var _delCid=null;
+function openDeleteModal(cid){
+  var m=memberById(cid); if(!m)return;
+  _delCid=cid;
+  document.getElementById('del_name').textContent=m.name;
+  document.getElementById('del_id').textContent=cid;
+  openModal('deleteModal');
+}
+function confirmDelete(){
+  if(!_delCid)return;
+  STATE.members.forEach(function(m){if(m.sponsorId===_delCid)m.sponsorId='';});
+  STATE.members=STATE.members.filter(function(m){return m.customerId!==_delCid;});
+  invalidateCache();
+  saveState(true);
+  closeModal('deleteModal');
+  toast('🗑 Member deleted','warning');
+  updateGlobalStats();
+  refreshAll();
+  _delCid=null;
+}
+
+// ================================================================
+// [FIX 2] CHANGE SPONSOR MODAL
+// Allows moving any user under a different upline (or making root)
+// ================================================================
+var _smCid=null;
+function openSponsorModal(cid){
+  var m=memberById(cid); if(!m)return;
+  _smCid=cid;
+  document.getElementById('sm_memberInfo').innerHTML=
+    '<div style="font-weight:700;color:var(--gold-light)">'+m.name+'</div>'+
+    '<div style="font-family:monospace;font-size:.72rem;color:var(--text-muted)">'+cid+'</div>'+
+    '<div style="margin-top:6px;font-size:.78rem;color:var(--text-muted)">Current sponsor: <span style="color:'+(m.sponsorId?'var(--emerald-light)':'#A78BFA')+'">'+
+    (m.sponsorId?(memberById(m.sponsorId)?memberById(m.sponsorId).name+' ('+m.sponsorId+')':m.sponsorId):'Root member (no sponsor)')+'</span></div>';
+  document.getElementById('sm_newSponsor').value=m.sponsorId||'';
+  sm_previewSponsor();
+  openModal('sponsorModal');
+}
+function sm_previewSponsor(){
+  var sid=document.getElementById('sm_newSponsor').value.trim().toUpperCase();
+  var prev=document.getElementById('sm_sponsorPreview');
+  if(!sid){prev.textContent='→ Will become a root member (no sponsor)';prev.style.color='#A78BFA';return;}
+  var sp=memberById(sid);
+  if(sp){
+    prev.textContent='→ New sponsor: '+sp.name+' ('+sid+')';
+    prev.style.color='#34D399';
+  } else {
+    prev.textContent='⚠ ID not found in the system';
+    prev.style.color='#f87171';
+  }
+}
+function saveSponsorChange(){
+  var m=memberById(_smCid); if(!m){toast('⚠ Member not found','error');return;}
+  var newSponsor=document.getElementById('sm_newSponsor').value.trim().toUpperCase();
+  if(newSponsor&&!memberById(newSponsor)){toast('⚠ Sponsor ID not found','error');return;}
+  // Prevent circular: new sponsor cannot be a descendant of this member
+  if(newSponsor===_smCid){toast('⚠ Member cannot sponsor themselves','error');return;}
+  if(isDescendant(_smCid,newSponsor)){toast('⚠ Cannot move: target is already a descendant of this member','error');return;}
+  m.sponsorId=newSponsor;
+  invalidateCache();
+  saveState(true);
+  closeModal('sponsorModal');
+  toast('✓ Sponsor updated for '+m.name,'success');
+  updateGlobalStats();
+  refreshAll();
+  _smCid=null;
+}
+// Check if 'targetId' is a descendant of 'ancestorId' — prevents circular sponsor chains
+function isDescendant(ancestorId, targetId){
+  if(!targetId) return false;
+  var visited=new Set(), queue=[ancestorId];
+  while(queue.length){
+    var cur=queue.shift();
+    if(cur===targetId) return true;
+    if(visited.has(cur)) continue;
+    visited.add(cur);
+    STATE.members.forEach(function(m){ if(m.sponsorId===cur) queue.push(m.customerId); });
+  }
+  return false;
+}
+
+// ================================================================
+// POINTS MANAGER TABLE
+// ================================================================
+function renderPointsTable(){
+  var q=(document.getElementById('ptsSearch').value||'').toLowerCase();
+  var sorted=getSorted();
+  var filtered=q?sorted.filter(function(m){return m.name.toLowerCase().includes(q)||m.customerId.toLowerCase().includes(q);}):sorted;
+  var frag=document.createDocumentFragment();
+  filtered.forEach(function(m,i){
+    var rank=sorted.indexOf(m)+1;
+    var tp=totalPts(m);
+    var tr=document.createElement('tr');
+    tr.className='row-anim';
+    tr.style.animationDelay=Math.min(i*8,400)+'ms';
+    tr.innerHTML=
+      '<td><span style="color:var(--text-muted);font-weight:700;font-size:.78rem">'+rank+'</span></td>'+
+      '<td><span style="font-weight:600">'+m.name+'</span></td>'+
+      '<td><span class="cid-mono">'+m.customerId+'</span></td>'+
+      '<td class="pts-blue">'+m.directPoints+'</td>'+
+      '<td class="pts-teal">'+m.firstOrbitPoints+'</td>'+
+      '<td class="pts-purple">'+m.secondOrbitPoints+'</td>'+
+      '<td class="pts-gold">'+tp+'</td>'+
+      '<td><button class="btn btn-gold btn-xs" onclick="openPtsModal(\''+m.customerId+'\')">⚡ Edit</button></td>';
+    frag.appendChild(tr);
+  });
+  var tb=document.getElementById('ptsBody');
+  tb.innerHTML='';
+  tb.appendChild(frag);
+  if(!filtered.length) tb.innerHTML='<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted)">No members found</td></tr>';
+}
+
+// Points Modal
+var _ptsCid=null;
+function openPtsModal(cid){
+  var m=memberById(cid); if(!m)return;
+  _ptsCid=cid;
+  document.getElementById('pm_memberInfo').innerHTML=
+    '<div style="font-weight:700;color:var(--gold-light)">'+m.name+'</div>'+
+    '<div style="font-family:monospace;font-size:.72rem;color:var(--text-muted)">'+cid+'</div>'+
+    '<div style="margin-top:6px;font-size:.78rem;color:var(--text-muted)">Current: <span class="pts-blue">D:'+m.directPoints+'</span> <span class="pts-teal">F:'+m.firstOrbitPoints+'</span> <span class="pts-purple">S:'+m.secondOrbitPoints+'</span></div>';
+  document.getElementById('pm_dp').value=m.directPoints||0;
+  document.getElementById('pm_fop').value=m.firstOrbitPoints||0;
+  document.getElementById('pm_sop').value=m.secondOrbitPoints||0;
+  pm_calcTotal();
+  openModal('ptsModal');
+}
+function pm_calcTotal(){
+  var dp=parseInt(document.getElementById('pm_dp').value)||0;
+  var fop=parseInt(document.getElementById('pm_fop').value)||0;
+  var sop=parseInt(document.getElementById('pm_sop').value)||0;
+  document.getElementById('pm_total').textContent=dp+fop+sop;
+}
+function pm_resetPoints(){
+  ['pm_dp','pm_fop','pm_sop'].forEach(function(id){document.getElementById(id).value=0;});
+  pm_calcTotal();
+}
+function savePoints(){
+  var m=memberById(_ptsCid); if(!m){toast('⚠ Member not found','error');return;}
+  m.directPoints=parseInt(document.getElementById('pm_dp').value)||0;
+  m.firstOrbitPoints=parseInt(document.getElementById('pm_fop').value)||0;
+  m.secondOrbitPoints=parseInt(document.getElementById('pm_sop').value)||0;
+  invalidateCache();
+  saveState(true);
+  closeModal('ptsModal');
+  toast('✓ Points updated for '+m.name,'success');
+  // [FIX 4] Immediate stats update after points change
+  updateGlobalStats();
+  refreshAll();
+  _ptsCid=null;
+}
+
+// ================================================================
+// ORBIT VIEWER MODAL
+// ================================================================
+var _omCid=null,_omTab=1;
+function openOrbitModal(cid){
+  var m=memberById(cid); if(!m)return;
+  _omCid=cid;_omTab=1;
+  document.getElementById('om_name').textContent=m.name+' — Orbit';
+  document.getElementById('om_cid').textContent='ID: '+cid;
+  var fo=getOrbit1(cid),so=getOrbit2(cid);
+  document.getElementById('om_d').textContent=fo.length;
+  document.getElementById('om_s').textContent=so.length;
+  document.getElementById('om_p').textContent=totalPts(m);
+  document.getElementById('ot1').classList.add('active');
+  document.getElementById('ot2').classList.remove('active');
+  om_renderTab(1);
+  openModal('orbitModal');
+}
+function om_switchTab(n){_omTab=n;document.getElementById('ot1').classList.toggle('active',n===1);document.getElementById('ot2').classList.toggle('active',n===2);om_renderTab(n);}
+function om_renderTab(tab){
+  var area=document.getElementById('om_body');
+  if(tab===1){
+    var fo=getOrbit1(_omCid);
+    if(!fo.length){area.innerHTML='<div class="orb-empty">🌱 No direct recruits yet</div>';return;}
+    var h='<div style="font-size:.79rem;color:var(--text-muted);margin-bottom:12px;padding:8px 12px;background:rgba(212,175,55,.05);border-left:3px solid var(--gold);border-radius:0 6px 6px 0"><strong style="color:var(--gold-light)">'+fo.length+'</strong> direct recruit(s)</div>';
+    fo.forEach(function(m){h+='<div class="orb-card" onclick="openOrbitModal(\''+m.customerId+'\')"><div class="orb-avi avi1">'+initials(m.name)+'</div><div class="orb-info"><div class="nm">'+m.name+'</div><div class="id">'+m.customerId+'</div></div><div class="orb-pts">'+totalPts(m)+' pts</div></div>';});
+    area.innerHTML=h;
+  } else {
+    var so=getOrbit2(_omCid);
+    if(!so.length){area.innerHTML='<div class="orb-empty">🌐 No second orbit members yet</div>';return;}
+    var h2='<div style="font-size:.79rem;color:var(--text-muted);margin-bottom:12px;padding:8px 12px;background:rgba(124,58,237,.06);border-left:3px solid #A78BFA;border-radius:0 6px 6px 0"><strong style="color:#A78BFA">'+so.length+'</strong> second-orbit member(s)</div>';
+    so.forEach(function(e){h2+='<div class="orb-card" onclick="openOrbitModal(\''+e.member.customerId+'\')"><div class="orb-avi avi2">'+initials(e.member.name)+'</div><div class="orb-info"><div class="nm">'+e.member.name+'</div><div class="id">'+e.member.customerId+' · via '+e.via.name+'</div></div><div class="orb-pts" style="background:rgba(124,58,237,.12);border-color:rgba(167,139,250,.25);color:#A78BFA">'+totalPts(e.member)+' pts</div></div>';});
+    area.innerHTML=h2;
+  }
+}
+
+// ================================================================
+// [FIX 2] TEAM TREE — with Change Sponsor button per node
+// ================================================================
+function renderTree(){
+  var allKids=new Set(STATE.members.filter(function(m){return m.sponsorId;}).map(function(m){return m.customerId;}));
+  var roots=STATE.members.filter(function(m){return !m.sponsorId;});
+  var frag=document.createDocumentFragment();
+  var wrapper=document.createElement('div');
+  roots.forEach(function(m){wrapper.innerHTML+=treeNodeHtml(m,0);});
+  frag.appendChild(wrapper);
+  var tb=document.getElementById('treeBody');
+  tb.innerHTML='';
+  if(!roots.length){tb.innerHTML='<div style="text-align:center;padding:32px;color:var(--text-muted)">No members yet</div>';return;}
+  tb.appendChild(frag);
+}
+
+function treeNodeHtml(m,depth){
+  var children=getOrbit1(m.customerId);
+  var hasKids=children.length>0;
+  var depthColors=['var(--emerald-light)','#60A5FA','#A78BFA'];
+  var col=depthColors[Math.min(depth,2)];
+  var ml=depth>0?(depth*6)+'px':'0';
+
+  var html='<div id="ttn_'+m.customerId+'" style="margin-left:'+ml+';margin-bottom:4px">'+
+    '<div class="tree-node">'+
+    (hasKids?'<button class="tree-toggle" id="tbtn_'+m.customerId+'" onclick="ttToggle(\''+m.customerId+'\')" title="Expand">▶</button>':'<span style="width:20px;flex-shrink:0"></span>')+
+    '<div class="tree-avi" style="background:rgba(0,0,0,.25);border:1px solid '+col+'33;color:'+col+'">'+initials(m.name)+'</div>'+
+    '<div class="tree-info">'+
+      '<div class="tree-nm" onclick="openOrbitModal(\''+m.customerId+'\')" style="cursor:pointer;color:'+col+'">'+m.name+'</div>'+
+      '<div class="tree-id">'+m.customerId+(m.sponsorId?' · Sponsor: '+(memberById(m.sponsorId)?memberById(m.sponsorId).name+' ('+m.sponsorId+')':m.sponsorId):' · Root')+'</div>'+
+    '</div>'+
+    '<span class="tag tag-gold" style="font-size:.65rem">'+totalPts(m)+' pts</span>'+
+    '<div style="display:flex;gap:5px;margin-left:4px">'+
+      '<button class="btn btn-ghost btn-xs" onclick="openEditUser(\''+m.customerId+'\')" title="Edit">✏</button>'+
+      '<button class="btn btn-blue btn-xs" onclick="openSponsorModal(\''+m.customerId+'\')" title="Change Sponsor">🔀</button>'+
+      '<button class="btn btn-red btn-xs" onclick="openDeleteModal(\''+m.customerId+'\')" title="Delete">🗑</button>'+
+    '</div>'+
+    '</div>';
+
+  if(hasKids){
+    html+='<div class="tree-children" id="ttc_'+m.customerId+'">';
+    children.forEach(function(child){html+=treeNodeHtml(child,depth+1);});
+    html+='</div>';
+  }
+  html+='</div>';
+  return html;
+}
+
+function ttToggle(cid){
+  var cc=document.getElementById('ttc_'+cid);
+  var btn=document.getElementById('tbtn_'+cid);
+  if(!cc)return;
+  cc.classList.toggle('open');
+  if(btn)btn.classList.toggle('open');
+}
+
+function filterTree(q){
+  q=(q||'').toLowerCase().trim();
+  document.querySelectorAll('#treeBody .tree-node').forEach(function(node){
+    var wrap=node.parentElement;
+    var nm=node.querySelector('.tree-nm')?node.querySelector('.tree-nm').textContent.toLowerCase():'';
+    var id=node.querySelector('.tree-id')?node.querySelector('.tree-id').textContent.toLowerCase():'';
+    if(!q||nm.includes(q)||id.includes(q)){
+      if(wrap) wrap.style.display='';
+      node.style.background=q?'rgba(16,185,129,.07)':'';
+    } else {
+      if(wrap) wrap.style.display='none';
+    }
+  });
+}
+
+// ================================================================
+// [FIX 5] LEADERBOARD — preserves open expand rows on refresh
+// Tracks which CIDs have open expand rows; restores after rebuild
+// ================================================================
+var _lbPrevRanks={};
+// [FIX 5] Set of CIDs whose expand rows are open
+var _lbOpenRows=new Set();
+
+function renderLBTable(){
+  var q=(document.getElementById('lbSearch').value||'').toLowerCase();
+  var sorted=getSorted();
+  var filtered=q?sorted.filter(function(m){return m.name.toLowerCase().includes(q)||m.customerId.toLowerCase().includes(q);}):sorted;
+  var frag=document.createDocumentFragment();
+
+  filtered.forEach(function(m,i){
+    var rank=sorted.indexOf(m)+1;
+    var rBadge=rank===1?'<span class="rank-badge medal-gold">1</span>':rank===2?'<span class="rank-badge medal-silver">2</span>':rank===3?'<span class="rank-badge medal-bronze">3</span>':'<span style="color:var(--text-muted);font-size:.78rem;font-weight:700;font-family:\'Cinzel\',serif">'+rank+'</span>';
+    var expId='lbexp_'+m.customerId;
+    var isOpen=_lbOpenRows.has(m.customerId); // [FIX 5] restore open state
+
+    // Flash detection
+    var flash='';
+    if(_lbPrevRanks[m.customerId]!==undefined){
+      if(rank<_lbPrevRanks[m.customerId]) flash=' flash-up';
+      else if(rank>_lbPrevRanks[m.customerId]) flash=' flash-dn';
+    }
+    _lbPrevRanks[m.customerId]=rank;
+
+    var tr=document.createElement('tr');
+    tr.className='row-anim'+(rank===1?' lb-r1':rank===2?' lb-r2':rank===3?' lb-r3':'')+flash;
+    tr.style.animationDelay=Math.min(i*8,400)+'ms';
+    if(rank===1) tr.style.cssText+='background:linear-gradient(90deg,rgba(212,175,55,.1),rgba(212,175,55,.05),rgba(212,175,55,.1));border-left:3px solid var(--gold)';
+    if(rank===2) tr.style.cssText+='border-left:3px solid #94a3b8';
+    if(rank===3) tr.style.cssText+='border-left:3px solid #f97316';
+    tr.setAttribute('data-eid',expId);
+    if(isOpen) tr.classList.add('xopen');
+    tr.innerHTML=rBadge+'</td>'+
+      '<td><span style="font-weight:600">'+m.name+'</span>'+(rank===1?' <span style="font-size:.62rem;background:linear-gradient(135deg,#fde68a,#D4AF37);color:#78350f;padding:1px 6px;border-radius:8px;font-weight:800">👑 TOP</span>':'')+
+      '<span style="display:inline-block;transition:transform .3s;margin-left:6px;font-size:.65rem;color:var(--text-muted)'+(isOpen?';transform:rotate(180deg)':'')+'">▼</span></td>'+
+      '<td><span class="cid-mono">'+m.customerId+'</span></td>'+
+      '<td><span class="tag tag-blue">'+directRecruitCount(m.customerId)+'</span></td>'+
+      '<td class="pts-blue">'+m.directPoints+'</td>'+
+      '<td class="pts-teal">'+m.firstOrbitPoints+'</td>'+
+      '<td class="pts-purple">'+m.secondOrbitPoints+'</td>'+
+      '<td><span style="font-family:\'Cinzel\',serif;font-weight:800;font-size:.95rem;background:linear-gradient(135deg,var(--gold-light),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent">'+totalPts(m)+'</span></td>';
+    // Fix: wrap first td properly
+    tr.innerHTML='<td>'+tr.innerHTML;
+
+    // Expand row
+    var expTr=document.createElement('tr');
+    expTr.className='exp-row'+(isOpen?' lb-open':''); // [FIX 5] restore visibility
+    expTr.id=expId;
+    var fo=getOrbit1(m.customerId);
+    var expRows=fo.length>0?fo.map(function(mm){
+      return '<tr style="border-bottom:1px solid rgba(255,255,255,.04)"><td style="padding:8px 16px;font-size:.82rem;color:var(--text-primary)">'+mm.name+'</td><td style="padding:8px 16px;font-family:monospace;font-size:.72rem;color:var(--text-muted)">'+mm.customerId+'</td><td style="padding:8px 16px;color:var(--emerald-light);font-weight:700;font-size:.82rem">'+totalPts(mm)+' pts</td></tr>';
+    }).join(''):'<tr><td colspan="3" style="padding:12px 16px;font-size:.8rem;color:var(--text-muted)">No direct recruits</td></tr>';
+    expTr.innerHTML='<td colspan="8" style="padding:0"><div style="margin:6px 16px 10px;background:rgba(0,0,0,.3);border:1px solid rgba(212,175,55,.1);border-radius:12px;overflow:hidden"><div style="padding:10px 16px;border-bottom:1px solid rgba(255,255,255,.05);font-size:.72rem;font-weight:700;color:var(--gold);letter-spacing:1.5px;text-transform:uppercase">Direct Team — '+m.name+'</div><table style="width:100%"><thead><tr style="background:rgba(255,255,255,.03)"><th style="padding:8px 16px;text-align:left;font-size:.68rem;color:var(--text-muted);text-transform:uppercase">Member</th><th style="padding:8px 16px;text-align:left;font-size:.68rem;color:var(--text-muted);text-transform:uppercase">ID</th><th style="padding:8px 16px;text-align:left;font-size:.68rem;color:var(--text-muted);text-transform:uppercase">Pts</th></tr></thead><tbody>'+expRows+'</tbody></table></div></td>';
+
+    // [FIX 5] Click handler: track open state in _lbOpenRows
+    tr.addEventListener('click', function(){
+      var wasOpen=expTr.classList.contains('lb-open');
+      expTr.classList.toggle('lb-open',!wasOpen);
+      tr.classList.toggle('xopen',!wasOpen);
+      var chev=tr.querySelector('span[style*="transform"]');
+      if(chev) chev.style.transform=wasOpen?'rotate(0deg)':'rotate(180deg)';
+      if(wasOpen) _lbOpenRows.delete(m.customerId); // [FIX 5] track close
+      else        _lbOpenRows.add(m.customerId);    // [FIX 5] track open
+    });
+
+    frag.appendChild(tr);
+    frag.appendChild(expTr);
+  });
+
+  var tb=document.getElementById('lbBody');
+  tb.innerHTML='';
+  tb.appendChild(frag);
+  if(!filtered.length) tb.innerHTML='<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted)">No data</td></tr>';
+}
+
+// ================================================================
+// [FIX 3] MONTHLY RESET — resets ONLY points, preserves structure
+// ================================================================
+function openResetModal(){document.getElementById('resetPwd').value='';openModal('resetModal');}
+function confirmReset(){
+  var pwd=document.getElementById('resetPwd').value;
+  if(pwd!==RESET_PASSWORD){toast('⚠ Incorrect password','error');return;}
+  // [FIX 3] ONLY reset points — never touch name/customerId/sponsorId
+  STATE.members.forEach(function(m){
+    m.directPoints=0;
+    m.firstOrbitPoints=0;
+    m.secondOrbitPoints=0;
+    // sponsorId, customerId, name: untouched
+  });
+  invalidateCache();
+  saveState(true);
+  closeModal('resetModal');
+  toast('✓ Monthly reset done — points cleared, structure preserved','warning');
+  // [FIX 4] Immediate stats update
+  updateGlobalStats();
+  refreshAll();
+}
+
+// ================================================================
+// [FIX 8] REFRESH ALL — context-aware, only updates active view
+// Does NOT close open modals or panels
+// ================================================================
+function refreshAll(){
+  invalidateCache(); // always invalidate sort cache first
+  var activePage=document.querySelector('.admin-page.active');
+  if(!activePage) return;
+  var id=activePage.id.replace('page-','');
+  if(id==='dashboard')   renderDashboard();
+  if(id==='users')       renderUsersTable();
+  if(id==='points')      renderPointsTable();
+  if(id==='tree')        renderTree();
+  if(id==='leaderboard') renderLBTable();
+  updateGlobalStats(); // always update stats
+}
+
+// ================================================================
+// [FIX 6] CROSS-TAB DATA SYNC
+// BroadcastChannel for same-origin instant sync (modern browsers)
+// Falls back to storage event for older browsers
+// ================================================================
+var _bc=null;
+try {
+  _bc=new BroadcastChannel('growbit_sync');
+  _bc.onmessage=function(e){
+    if(e.data==='update'){
+      loadState();
+      refreshAll();
+    }
+  };
+} catch(e){}
+
+window.addEventListener('storage',function(e){
+  if(e.key===LS_KEY){
+    loadState();
+    refreshAll();
+  }
+});
+
+// Notify other tabs after every save
+var _origDoSave=_doSave;
+_doSave=function(){
+  _origDoSave();
+  try { if(_bc) _bc.postMessage('update'); } catch(e){}
+};
+
+// ================================================================
+// INIT
+// ================================================================
+loadState();
+renderDashboard();
+</script>
+</body>
+</html>
